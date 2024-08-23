@@ -105,7 +105,7 @@ def ensure_ytmusic_auth(ytmusic):
             if headers:
                 config = load_config(YTMUSIC_CONFIG)
                 config['headers'] = headers
-                save_config(config, YTMUSIC_CONFIG)
+                save_config(YTMUSIC_CONFIG, config)
                 ytmusic = YTMusic(headers)
             else:
                 print("Reauthentication failed")

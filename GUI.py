@@ -36,10 +36,8 @@ class GUI:
         self.source_menu.pack(side=tk.LEFT)
 
         self.destination = tk.StringVar()
-        self.destination.set('Select Destination')
-        self.destination.trace_add('write', self.check_selection)
-        self.destination_menu = tk.OptionMenu(self.snDframe, self.destination, 'Youtube Music', 'Spotify')
-        self.destination_menu.pack(side=tk.RIGHT)
+        self.destination_option = tk.Label(master= self.snDframe,text= '')
+        self.destination_option.pack(side=tk.RIGHT)
 
         self.destination_label = tk.Label(master=self.snDframe, text='Destination:')
         self.destination_label.pack(side=tk.RIGHT)
@@ -62,6 +60,23 @@ class GUI:
         self.song_button.pack(side=tk.LEFT, anchor=tk.CENTER)
         self.album_button.pack(side=tk.LEFT, anchor=tk.CENTER)
         self.artist_button.pack(side=tk.LEFT, anchor=tk.CENTER)
+
+        self.search_frame = tk.Frame(self.root, width=450)
+        self.search_frame.pack(fill=tk.X)
+
+        self.search_label = tk.Label(master=self.search_frame, text='Search Song:')
+        self.search_label.pack(side=tk.LEFT)
+
+        self.search_entry = tk.Entry(master=self.search_frame)
+
+        #self.search_entry.bind('<Return>', lambda event: self.search())
+        self.search_entry.bind("<KeyRelease>", lambda event: self.search())
+
+        self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Add Select All button
+        self.select_all_button = tk.Button(master=self.search_frame, text='Select All', command=self.select_all_items)
+        self.select_all_button.pack(side=tk.LEFT)
 
     def create_convert_frame(self):
         """Create the frame for displaying items to convert."""
@@ -105,20 +120,42 @@ class GUI:
         self.selected_type_method()
 
     def check_selection(self, *args):
+        self.clear_convert_frame()
         if self.source.get() != 'Select Source':
             self.enable_type_buttons()
-            if self.destination.get() != 'Select Destination':
+            if self.destination.get() != '':
                 self.convert_button.config(state=tk.NORMAL)
         else:
             self.disable_type_buttons()
-        if self.source.get() == 'Youtube Music' or self.destination.get() == 'Youtube Music':
+        # Check if YouTube Music is selected as source or destination
+        if self.source.get() == 'Youtube Music':
             if not self.ytmusic:
                 self.ytmusic = self.setup_ytmusic()
             else:
-                self.ytmusic = self.ensure_ytmusic_auth(self.ytmusic) 
-        if self.source.get() == "Spotify" or self.destination.get() == "Spotify":
+                self.ytmusic = self.ensure_ytmusic_auth(self.ytmusic)
+            
+            # Automatically set the other service to Spotify
+            if self.source.get() == 'Youtube Music':
+                self.destination.set('Spotify')
+                self.destination_option.config(text='Spotify')
+            
             if not self.spotify:
                 self.spotify = self.setup_spotify('user-library-modify, user-library-read, user-follow-read, playlist-modify-public, playlist-modify-private, user-follow-modify')
+        
+        # Check if Spotify is selected as source or destination
+        if self.source.get() == 'Spotify' or self.destination.get() == 'Spotify':
+            if not self.spotify:
+                self.spotify = self.setup_spotify('user-library-modify, user-library-read, user-follow-read, playlist-modify-public, playlist-modify-private, user-follow-modify')
+            
+            # Automatically set the other service to YouTube Music
+            if self.source.get() == 'Spotify':
+                self.destination.set('Youtube Music')
+                self.destination_option.config(text='Youtube Music')
+            
+            if not self.ytmusic:
+                self.ytmusic = self.setup_ytmusic()
+            else:
+                self.ytmusic = self.ensure_ytmusic_auth(self.ytmusic)
 
     def enable_type_buttons(self):
         """Enable the type selection buttons."""
@@ -140,6 +177,40 @@ class GUI:
             widget.destroy()
         self.checkbutton_vars = []
 
+    
+
+    def search(self):
+        #print(self.checkbutton_vars)
+        query = self.search_entry.get().lower()
+        if query == '':
+            self.restore_convert_frame()
+            return
+        for widget in self.scrollable_frame.winfo_children():
+            #get the whole item
+            item = widget.winfo_children()[1]
+            print(item in self.checkbutton_vars)
+            item_text = widget.winfo_children()[1].cget('text').lower()
+            if query in item_text or item in self.checkbutton_vars:
+                widget.pack(fill=tk.X, expand=False)
+            else:
+                widget.pack_forget()
+            
+    def restore_convert_frame(self):
+        for widget in self.scrollable_frame.winfo_children():
+            widget.pack(fill=tk.X, expand=True)
+
+    def select_all_items(self):
+        self.select_all_button.config(text='Deselect All', command=self.deselect_all_items)
+        for item in self.scrollable_frame.winfo_children():
+            item.winfo_children()[0].select()
+            self.checkbutton_vars.append(item.winfo_children()[1].cget('text'))
+    
+    def deselect_all_items(self):
+        self.select_all_button.config(text='Select All', command=self.select_all_items)
+        for item in self.scrollable_frame.winfo_children():
+            item.winfo_children()[0].deselect()
+            self.checkbutton_vars.remove(item.winfo_children()[1].cget('text'))
+
     def selected_type_method(self, *args):
         self.clear_convert_frame()
         if self.source.get() == 'Youtube Music' and self.ytmusic:
@@ -148,15 +219,51 @@ class GUI:
             self.populate_items(self.spotify, self.media_type)
 
     def populate_items(self, service, media_type):
+        limit = 50
+        offset = 0
+        items = []
         """Populate the convert frame with items based on the selected media type."""
         if media_type == 'playlist':
-            items = service.get_library_playlists(limit=50000) if service == self.ytmusic else service.current_user_playlists()['items']
+            if service == self.ytmusic:
+                items = service.get_library_playlists(limit=50000)
+            else:
+                while True:
+                    response = service.current_user_playlists(limit=limit, offset=offset)
+                    items.extend(response['items'])
+                    if len(response['items']) < limit:
+                        break
+                    offset += limit
         elif media_type == 'album':
-            items = service.get_library_albums(limit=50000) if service == self.ytmusic else service.current_user_saved_albums()['items']
+            if service == self.ytmusic:
+                items = service.get_library_albums(limit=50000)
+            else:
+                while True:
+                    response = service.current_user_saved_albums(limit=limit, offset=offset)
+                    items.extend(response['items'])
+                    if len(response['items']) < limit:
+                        break
+                    offset += limit
         elif media_type == 'artist':
-            items = service.get_library_artists(limit=50000) if service == self.ytmusic else service.current_user_followed_artists()['artists']['items']
+            if service == self.ytmusic:
+                items = service.get_library_artists(limit=50000)
+            else:
+                after = None
+                while True:
+                    response = service.current_user_followed_artists(limit=20, after=after)                          
+                    items.extend(response['artists']['items'])
+                    if len(response['artists']['items']) < limit:
+                        break
+                    after = response['artists']['items'][-1]['id']
         elif media_type == 'song':
-            items = service.get_library_songs(limit=50000) if service == self.ytmusic else service.current_user_saved_tracks()['items'] #there's a limit. can use offset to try and get more in a looped call
+            if service == self.ytmusic:
+                items = service.get_library_songs(limit=50000)
+            else:
+                while True:
+                    response = service.current_user_saved_tracks(limit=limit, offset=offset)
+                    items.extend(response['items'])
+                    if len(response['items']) < limit:
+                        break
+                    offset += limit
 
         for item in items:
             #title = item['title'] if service == self.ytmusic else item['name']
